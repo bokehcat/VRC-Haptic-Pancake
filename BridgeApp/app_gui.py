@@ -15,6 +15,7 @@ KEY_BTN_APPLY = '-BTN-APPLY-'
 KEY_BTN_REFRESH = '-BTN-REFRESH'
 KEY_OPEN_URL = '-OPENURL'
 KEY_OSC_STATUS_BAR = '-OSC-STATUS-BAR-'
+KEY_TRACKER_STATUS_BAR = '-TRACKER-STATUS-BAR-'
 KEY_LAYOUT_TRACKERS = '-LAYOUT-TRACKERS-'
 KEY_OSC_ADDRESS = '-ADDRESS-OF-'
 KEY_VIB_STR_OVERRIDE = '-VIB-STR-'
@@ -32,6 +33,9 @@ KEY_VIB_STR_MAX = '-VIB-STR-MAX-'
 KEY_VIB_PATTERN = '-VIB-PTN-'
 KEY_VIB_SPEED = '-VIB-SPD-'
 
+# Background refresh
+KEY_TIMER_REFRESH = '-TIMER-REFRESH-'
+TIMER_REFRESH_MS = 30 * 1000
 
 class GUIRenderer:
     def __init__(self, app_config: AppConfig, tracker_test_event,
@@ -48,6 +52,7 @@ class GUIRenderer:
         self.layout_dirty = False
         self.trackers = []
         self.osc_status_bar = sg.Text('', key=KEY_OSC_STATUS_BAR)
+        self.tracker_status_bar = sg.Text('', key=KEY_TRACKER_STATUS_BAR, font='_ 14')
         self.tracker_frame = sg.Column([], key=KEY_LAYOUT_TRACKERS, scrollable=True, vertical_scroll_only=True, expand_y=True, size=(406,270))
         self.layout = []
         self.build_layout()
@@ -76,7 +81,7 @@ class GUIRenderer:
             [sg.Text('Haptic settings:', font='_ 14')],
             [proximity_frame, velocity_frame],
             [self.small_vertical_space()],
-            [sg.Text('Devices:', font='_ 14')],
+            [sg.Text('Devices:', font='_ 14'), self.tracker_status_bar],
             [self.tracker_frame],
         ]
 
@@ -105,7 +110,7 @@ class GUIRenderer:
     def small_vertical_space():
         return sg.Text('', font=('AnyFont', 1), auto_size_text=True)
 
-    def device_row(self, tracker_serial, tracker_model, additional_layout, icon=None, color=None):
+    def device_row(self, tracker_serial, tracker_model, additional_layout, icon=None, color=None, quiet_refresh=False):
         if icon is None:
             icon = "⚫"
 
@@ -118,7 +123,8 @@ class GUIRenderer:
 
         multiplier_tooltip = "Additional strength multiplier\nCompensates for different trackers\n1.0 for default (Vive/Tundra Tracker)\n200 for Vive Wand\n400 for Index c."
 
-        print(f"[GUI] Adding tracker: {string}")
+        if not quiet_refresh:
+            print(f"[GUI] Adding tracker: {string}")
         layout = [
             [sg.Checkbox('', default=True, pad=0), sg.Text(icon, text_color=color, pad=0), sg.Text(string, pad=(0, 0))],
             [sg.Text(" "), sg.Text("Address:"),
@@ -132,7 +138,7 @@ class GUIRenderer:
         row = [sg.pin(sg.Col(layout, key=('-ROW-', tracker_serial)))]
         return row
 
-    def tracker_row(self, tracker_serial, tracker_model, color=None):
+    def tracker_row(self, tracker_serial, tracker_model, color=None, quiet_refresh=False):
         dev_config = self.config.get_tracker_config(tracker_serial)
         vib_multiplier = dev_config.multiplier_override
         battery_threshold = dev_config.battery_threshold
@@ -149,11 +155,11 @@ class GUIRenderer:
                            size=4, tooltip=multiplier_tooltip),
               sg.Button("Calibrate", button_color='grey', disabled=True, key=(KEY_BTN_CALIBRATE, tracker_serial),
                         tooltip="Coming soon...")]
-        return self.device_row(tracker_serial, tracker_model, tr, color=color)
+        return self.device_row(tracker_serial, tracker_model, tr, color=color, quiet_refresh=quiet_refresh)
 
-    def add_tracker(self, tracker_serial, tracker_model, is_online=False):
-        row = [self.tracker_row(tracker_serial, tracker_model, color="green" if is_online else "red")]
-        self.add_target(tracker_serial, tracker_model, row)
+    def add_tracker(self, tracker_serial, tracker_model, is_online=False, quiet_refresh=False):
+        row = [self.tracker_row(tracker_serial, tracker_model, color="green" if is_online else "red", quiet_refresh=quiet_refresh)]
+        self.add_target(tracker_serial, tracker_model, row, quiet_refresh)
 
     def add_external_device(self, device_serial, device_model):
         layout = []
@@ -184,9 +190,10 @@ class GUIRenderer:
         row = [self.device_row(device_serial, device_model, layout, icon=icon)]
         self.add_target(device_serial, device_model, row)
 
-    def add_target(self, tracker_serial, tracker_model, layout):
+    def add_target(self, tracker_serial, tracker_model, layout, quiet_refresh):
         if tracker_serial in self.trackers:
-            print(f"[GUI] Tracker {tracker_serial} is already on the list. Skipping...")
+            if not quiet_refresh:
+                print(f"[GUI] Tracker {tracker_serial} is already on the list. Skipping...")
             return
 
         # row = [self.tracker_row(tracker_serial, tracker_model)]
@@ -225,6 +232,20 @@ class GUIRenderer:
             except Exception as e:
                 print("[GUI] Failed to update server status bar.")
 
+    def update_tracker_counts(self):
+        # Update device count
+        #message = "{0} / {1}".format(online, total)
+        message = str(len(self.trackers))
+
+        if self.window is None:
+            self.tracker_status_bar.DisplayText = message
+            return
+        if not self.shutting_down:
+            try:
+                self.tracker_status_bar.update(message)
+            except Exception as e:
+                print("[GUI] Failed to update tracker status bar.")
+
     def refresh(self):
         self.tracker_frame.contents_changed()
         self.tracker_frame.set_vscroll_position(1)
@@ -233,8 +254,10 @@ class GUIRenderer:
 
     def run(self):
         if self.window is None:
-            self.window = sg.Window(WINDOW_NAME, self.layout, keep_on_top=False, finalize=True, alpha_channel=0.9, icon=b'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABhWlDQ1BJQ0MgcHJvZmlsZQAAKJF9kT1Iw0AcxV9TpVIrDhYVcchQnezgB+JYqlgEC6Wt0KqDyaVf0KQhSXFxFFwLDn4sVh1cnHV1cBUEwQ8QZwcnRRcp8X9NoUWMB8f9eHfvcfcOEOplpppdEUDVLCMZi4qZ7Kroe0UvBjEEPyYlZurx1GIaruPrHh6+3oV5lvu5P0efkjMZ4BGJI0w3LOIN4tlNS+e8TxxkRUkhPieeMOiCxI9clx1+41xossAzg0Y6OU8cJBYLHSx3MCsaKvEMcUhRNcoXMg4rnLc4q+Uqa92TvzCQ01ZSXKc5ihiWEEcCImRUUUIZFsK0aqSYSNJ+1MU/0vQnyCWTqwRGjgVUoEJq+sH/4He3Zn56ykkKRIHuF9v+GAN8u0CjZtvfx7bdOAG8z8CV1vZX6sDcJ+m1thY6Avq3gYvrtibvAZc7wPCTLhlSU/LSFPJ54P2MvikLDNwC/jWnt9Y+Th+ANHW1fAMcHALjBcped3l3T2dv/55p9fcD3S9y0apk9h0AAAAGYktHRAD/AP8A/6C9p5MAAAAJcEhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfoCxYXCzDoJVaPAAACuElEQVQ4y2WTTW8bdRDGfzO767f1xnGcJiSNVNoKqMoJgRBCwifuIHFFuSDRTwDi2CNfgC/gGxfElV6ockEISAJBiAJ5KVnqxk7idbx+ie39DwcngaqH0Wj0HJ756ZmRjz7940Ym0nCe1DMVnArZRbn/d+85bcMJ6744GqrUzYFimIAamMF5P8GCAC1GqAMDlFk3qItKQ9WsrmaoGd32LjYeMeg0edj4mOP9Hzj4/ku2v77PJO3MtPZj1GYmYlb31c1ch2ct5uZW6XZikpN9Rr02v377BenRNsuvvkfa2sUP5wlKFbJhDy1FmAm+GpiD6XkfRFGDfD7infc/p9XcobTwGbmoRpq2sKBI8VqNXjemUCijAr6YXa2kCL74RHOrEORYufkW5vk4haJlOAQFyDLUAAeqzhBn5IOQwMsxGfUo5MqMBwm++IjLmPQTovk1PFFGyVPCygpqhphdIBiUS4t0zg5ZWrqL84RcWL2KraTgVPEWb5KmLQIvT+bsWYThIKF1+BO9XpPDg+9YufU2raPfqCy/zOnJHvlyFcmVyMhYq65h/yGAOGA64cmjBxzHW/Tbf5Ec/c5Z6xFh+RphtESvfUAn3mFh+Q5yEbuYoZc3oAbVxZc4T2KiuRcYnP7N3dc/JCzVZjpGLiiyv/kVl6bqDPnk3o51ksc0n25SrFwn85TxdIRXiBi7Mc5Tpm5CYX6F5uGP5Mo1BoMON974AK8YzRCycUpn9yHd5i9M0xO6/2xzGm9ynsSEpRrZ8Ixee4+9b+5TrqzSP96buV8ieA5eefMeMh7Re/IzleqLyGSEOkcn3iKJt+i3/qR2612GpzGlcBFPfdSBL8bG/MLtulMhfO06mQoWBLMIRXCesnZn+sxnLtkUTzww2/AxWw+8fMOJ1NUv4Lzn39lXIVOu5kAFJ7rhnK3/C07bcJ2GHOyzAAAAAElFTkSuQmCC')
+            self.window = sg.Window(WINDOW_NAME, self.layout, keep_on_top=False, finalize=True, alpha_channel=0.95, icon=b'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABhWlDQ1BJQ0MgcHJvZmlsZQAAKJF9kT1Iw0AcxV9TpVIrDhYVcchQnezgB+JYqlgEC6Wt0KqDyaVf0KQhSXFxFFwLDn4sVh1cnHV1cBUEwQ8QZwcnRRcp8X9NoUWMB8f9eHfvcfcOEOplpppdEUDVLCMZi4qZ7Kroe0UvBjEEPyYlZurx1GIaruPrHh6+3oV5lvu5P0efkjMZ4BGJI0w3LOIN4tlNS+e8TxxkRUkhPieeMOiCxI9clx1+41xossAzg0Y6OU8cJBYLHSx3MCsaKvEMcUhRNcoXMg4rnLc4q+Uqa92TvzCQ01ZSXKc5ihiWEEcCImRUUUIZFsK0aqSYSNJ+1MU/0vQnyCWTqwRGjgVUoEJq+sH/4He3Zn56ykkKRIHuF9v+GAN8u0CjZtvfx7bdOAG8z8CV1vZX6sDcJ+m1thY6Avq3gYvrtibvAZc7wPCTLhlSU/LSFPJ54P2MvikLDNwC/jWnt9Y+Th+ANHW1fAMcHALjBcped3l3T2dv/55p9fcD3S9y0apk9h0AAAAGYktHRAD/AP8A/6C9p5MAAAAJcEhZcwAACxMAAAsTAQCanBgAAAAHdElNRQfoCxYXCzDoJVaPAAACuElEQVQ4y2WTTW8bdRDGfzO767f1xnGcJiSNVNoKqMoJgRBCwifuIHFFuSDRTwDi2CNfgC/gGxfElV6ockEISAJBiAJ5KVnqxk7idbx+ie39DwcngaqH0Wj0HJ756ZmRjz7940Ym0nCe1DMVnArZRbn/d+85bcMJ6744GqrUzYFimIAamMF5P8GCAC1GqAMDlFk3qItKQ9WsrmaoGd32LjYeMeg0edj4mOP9Hzj4/ku2v77PJO3MtPZj1GYmYlb31c1ch2ct5uZW6XZikpN9Rr02v377BenRNsuvvkfa2sUP5wlKFbJhDy1FmAm+GpiD6XkfRFGDfD7infc/p9XcobTwGbmoRpq2sKBI8VqNXjemUCijAr6YXa2kCL74RHOrEORYufkW5vk4haJlOAQFyDLUAAeqzhBn5IOQwMsxGfUo5MqMBwm++IjLmPQTovk1PFFGyVPCygpqhphdIBiUS4t0zg5ZWrqL84RcWL2KraTgVPEWb5KmLQIvT+bsWYThIKF1+BO9XpPDg+9YufU2raPfqCy/zOnJHvlyFcmVyMhYq65h/yGAOGA64cmjBxzHW/Tbf5Ec/c5Z6xFh+RphtESvfUAn3mFh+Q5yEbuYoZc3oAbVxZc4T2KiuRcYnP7N3dc/JCzVZjpGLiiyv/kVl6bqDPnk3o51ksc0n25SrFwn85TxdIRXiBi7Mc5Tpm5CYX6F5uGP5Mo1BoMON974AK8YzRCycUpn9yHd5i9M0xO6/2xzGm9ynsSEpRrZ8Ixee4+9b+5TrqzSP96buV8ieA5eefMeMh7Re/IzleqLyGSEOkcn3iKJt+i3/qR2612GpzGlcBFPfdSBL8bG/MLtulMhfO06mQoWBLMIRXCesnZn+sxnLtkUTzww2/AxWw+8fMOJ1NUv4Lzn39lXIVOu5kAFJ7rhnK3/C07bcJ2GHOyzAAAAAElFTkSuQmCC')
             self.window.set_resizable(False, True)
+            # Start background refresh timer
+            self.window.timer_start(TIMER_REFRESH_MS, key=KEY_TIMER_REFRESH, repeating=False)
 
         # Update Layout if it's changed.
         if self.layout_dirty:
@@ -257,14 +280,18 @@ class GUIRenderer:
             return False
         if event[0] == KEY_BTN_TEST:
             self.tracker_test_event(event[1])
-        if event == KEY_BTN_ADD_EXTERNAL:
+        elif event == KEY_BTN_ADD_EXTERNAL:
             self.add_external_event(values[KEY_BTN_ADD_EXTERNAL])
-        if event == KEY_BTN_APPLY:
+        elif event == KEY_BTN_APPLY:
             self.restart_osc_event()
-        if event == KEY_BTN_REFRESH:
+        elif event == KEY_BTN_REFRESH:
             self.refresh_trackers_event()
-        if event == KEY_OPEN_URL:
+        elif event == KEY_OPEN_URL:
             webbrowser.open("https://hapticpancake.com/")
+        elif event == KEY_TIMER_REFRESH:
+            # Quietly refresh on timer elapse
+            self.refresh_trackers_event(quiet_refresh=True)
+            self.window.timer_start(TIMER_REFRESH_MS, key=KEY_TIMER_REFRESH, repeating=False)
 
         return True
 

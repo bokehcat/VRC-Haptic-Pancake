@@ -71,7 +71,7 @@ def restart_bridge_server():
     start_bridge_server()
 
 
-def refresh_tracker_list():
+def refresh_tracker_list(quiet_refresh=False):
     if vr is None or gui is None:
         return
 
@@ -83,7 +83,10 @@ def refresh_tracker_list():
 
     # Debug tracker (Uncomment this for debug purposes)
     # gui.add_tracker("T35T-53R1AL", "Test Model 1.0")
-    print("[Main] Tracker list refreshed")
+    if not quiet_refresh:
+        print("[Main] Tracker list refreshed")
+
+    gui.update_tracker_counts()
 
 
 def add_external_target(external_type):
