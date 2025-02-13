@@ -75,11 +75,13 @@ def refresh_tracker_list(quiet_refresh=False):
     if vr is None or gui is None:
         return
 
-    for device in vr.query_devices():
-        gui.add_tracker(device.serial, device.model, True)
-        
-    for serial, tracker_config in config.tracker_config_dict.items():
-        gui.add_tracker(serial, "- OFFLINE", False)
+    for device in vr.query_devices(quiet_refresh):
+        gui.add_tracker(device.serial, device.model, True, quiet_refresh)
+
+    #for serial, tracker_config in config.tracker_config_dict.items():
+    #    gui.add_tracker(serial, "- OFFLINE", False, quiet_refresh)
+    #
+    # FIXME: This needs to properly update existing UI elements!
 
     # Debug tracker (Uncomment this for debug purposes)
     # gui.add_tracker("T35T-53R1AL", "Test Model 1.0")
