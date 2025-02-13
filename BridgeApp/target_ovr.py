@@ -11,7 +11,7 @@ class OpenVRTracker:
         self.vr = None
         self.config = config
 
-    def try_init_openvr(self):
+    def try_init_openvr(self, quiet_refresh=False):
         if self.vr is not None:
             return True
         try:
@@ -20,11 +20,12 @@ class OpenVRTracker:
             print("[OpenVRTracker] Successfully initialized.")
             return True
         except:
-            print("[OpenVRTracker] Failed to initialize OpenVR.")
+            if not quiet_refresh:
+                print("[OpenVRTracker] Failed to initialize OpenVR.")
             return False
 
-    def query_devices(self):
-        if not self.try_init_openvr():
+    def query_devices(self, quiet_refresh=False):
+        if not self.try_init_openvr(quiet_refresh):
             return self.devices
 
         poses = self.vr.getDeviceToAbsoluteTrackingPose(openvr.TrackingUniverseStanding, 0,
